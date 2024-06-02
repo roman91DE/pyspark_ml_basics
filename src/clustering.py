@@ -3,10 +3,10 @@
 import atexit
 from pathlib import Path
 from sys import exit, stderr
-
-from pyspark.ml.evaluation import RegressionEvaluator
-from pyspark.ml.feature import Imputer, VectorAssembler
-from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
+from pyspark.ml.clustering import KMeans, GaussianMixture
+from pyspark.ml.evaluation import ClusteringEvaluator
+from pyspark.ml.feature import VectorAssembler
+from pyspark.sql.functions import col, when
 from pyspark.sql.types import (
     FloatType,
     IntegerType,
@@ -14,12 +14,11 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
-
-from src.lib import create_spark_session
+from lib import create_spark_session # type: ignore
 
 iris_file = Path(".") / "data" / "Iris.csv"
 if not iris_file.exists():
-    print(f"DataFile {iris_file} doesnt exist", file=stderr)
+    print(f"DataFile {iris_file} doesn't exist", file=stderr)
     exit(1)
 
 iris_schema = StructType(
@@ -40,151 +39,66 @@ feature_cols = [
     "PetalWidthCm",
 ]
 
-
 def main():
 
-    spark = create_spark_session("PySpark-Regression")
+    spark = create_spark_session("PySpark-Clustering")
     atexit.register(lambda: spark.stop())
 
     df = spark.read.csv(
-        str(boston_housing_file), schema=boston_housing_schema, header=True
+        str(iris_file), schema=iris_schema, header=True
+    ).drop("Id")
+
+    df.show()
+
+    # Assemble features into a single vector
+    assembler = VectorAssembler(inputCols=feature_cols, outputCol="features")
+    df = assembler.transform(df)
+
+    # Map species to integers
+    species_map = {
+        "Iris-setosa": 0,
+        "Iris-versicolor": 1,
+        "Iris-virginica": 2
+    }
+    df = df.withColumn(
+        "SpeciesIndex",
+        when(col("Species") == "Iris-setosa", 0)
+        .when(col("Species") == "Iris-versicolor", 1)
+        .when(col("Species") == "Iris-virginica", 2)
     )
 
-    # Impute missing values with the mean
-    imputer = Imputer(
-        inputCols=feature_cols, outputCols=[f"{col}_imp" for col in feature_cols]
-    ).setStrategy("mean")
+    # Define KMeans model
+    kmeans = KMeans(k=3, seed=1, featuresCol="features")
+    kmeans_model = kmeans.fit(df)
+    kmeans_predictions = kmeans_model.transform(df)
 
-    df_imputed = imputer.fit(df).transform(df)
+    # Evaluate KMeans clustering
+    evaluator = ClusteringEvaluator()
+    kmeans_silhouette = evaluator.evaluate(kmeans_predictions)
+    print(f"KMeans Silhouette Score: {kmeans_silhouette}")
 
-    # Create the feature vector
-    vectorAssembler = VectorAssembler(
-        inputCols=[f"{col}_imp" for col in feature_cols],
-        outputCol="features",
-        handleInvalid="error",
-    )
+    # Define GaussianMixture model
+    gmm = GaussianMixture(k=3, seed=1, featuresCol="features")
+    gmm_model = gmm.fit(df)
+    gmm_predictions = gmm_model.transform(df)
 
-    df_transformed = vectorAssembler.transform(df_imputed)
+    # Evaluate GaussianMixture clustering
+    gmm_silhouette = evaluator.evaluate(gmm_predictions)
+    print(f"GaussianMixture Silhouette Score: {gmm_silhouette}")
 
-    final_df = df_transformed.select("features", "MEDV")
+    # Show clustered data
+    kmeans_predictions.show()
+    gmm_predictions.show()
 
-    # Split into train and test sets
-    train_df, test_df = final_df.randomSplit([0.5, 0.5], seed=42)
+    # Evaluate clustering results against actual species labels
+    kmeans_evaluation = kmeans_predictions.groupBy("SpeciesIndex", "prediction").count().orderBy("SpeciesIndex", "prediction")
+    gmm_evaluation = gmm_predictions.groupBy("SpeciesIndex", "prediction").count().orderBy("SpeciesIndex", "prediction")
 
-    # Initialize models
-    lr = LinearRegression(labelCol="MEDV")
-    dt = DecisionTreeRegressor(labelCol="MEDV")
-    rf = RandomForestRegressor(labelCol="MEDV")
-    # gbt = GBTRegressor(labelCol="MEDV")
+    print("KMeans Clustering Results:")
+    kmeans_evaluation.show()
 
-    # Hyperparameter tuning for each model
-    paramGrid_lr = (
-        ParamGridBuilder()
-        .addGrid(lr.regParam, [0.01, 0.1, 0.5])
-        .addGrid(lr.elasticNetParam, [0.0, 0.5, 1.0])
-        .build()
-    )
-
-    paramGrid_dt = ParamGridBuilder().addGrid(dt.maxDepth, [5, 10, 20]).build()
-
-    paramGrid_rf = (
-        ParamGridBuilder()
-        .addGrid(rf.numTrees, [20, 50, 100])
-        .addGrid(rf.maxDepth, [5, 10, 20])
-        .build()
-    )
-
-    # paramGrid_gbt = (
-    #     ParamGridBuilder()
-    #     .addGrid(gbt.maxDepth, [5, 10, 20])
-    #     .addGrid(gbt.maxIter, [20, 50, 100])
-    #     .build()
-    # )
-
-    # CrossValidator for each model
-    crossval_lr = CrossValidator(
-        estimator=lr,
-        estimatorParamMaps=paramGrid_lr,
-        evaluator=RegressionEvaluator(labelCol="MEDV", metricName="rmse"),
-        numFolds=3,
-    )
-
-    crossval_dt = CrossValidator(
-        estimator=dt,
-        estimatorParamMaps=paramGrid_dt,
-        evaluator=RegressionEvaluator(labelCol="MEDV", metricName="rmse"),
-        numFolds=3,
-    )
-
-    crossval_rf = CrossValidator(
-        estimator=rf,
-        estimatorParamMaps=paramGrid_rf,
-        evaluator=RegressionEvaluator(labelCol="MEDV", metricName="rmse"),
-        numFolds=3,
-    )
-
-    # crossval_gbt = CrossValidator(
-    #     estimator=gbt,
-    #     estimatorParamMaps=paramGrid_gbt,
-    #     evaluator=RegressionEvaluator(labelCol="MEDV", metricName="rmse"),
-    #     numFolds=3,
-    # )
-
-    # Model training with hyperparameter tuning
-    lr_model = crossval_lr.fit(train_df)
-    dt_model = crossval_dt.fit(train_df)
-    rf_model = crossval_rf.fit(train_df)
-    # gbt_model = crossval_gbt.fit(train_df)
-
-    # Make predictions on the test set
-    lr_predictions = lr_model.transform(test_df)
-    dt_predictions = dt_model.transform(test_df)
-    rf_predictions = rf_model.transform(test_df)
-    # gbt_predictions = gbt_model.transform(test_df)
-
-    # Initialize evaluators for different metrics
-    evaluator_rmse = RegressionEvaluator(labelCol="MEDV", metricName="rmse")
-    evaluator_mae = RegressionEvaluator(labelCol="MEDV", metricName="mae")
-    evaluator_r2 = RegressionEvaluator(labelCol="MEDV", metricName="r2")
-
-    # Evaluate the models
-    lr_rmse = evaluator_rmse.evaluate(lr_predictions)
-    lr_mae = evaluator_mae.evaluate(lr_predictions)
-    lr_r2 = evaluator_r2.evaluate(lr_predictions)
-
-    dt_rmse = evaluator_rmse.evaluate(dt_predictions)
-    dt_mae = evaluator_mae.evaluate(dt_predictions)
-    dt_r2 = evaluator_r2.evaluate(dt_predictions)
-
-    rf_rmse = evaluator_rmse.evaluate(rf_predictions)
-    rf_mae = evaluator_mae.evaluate(rf_predictions)
-    rf_r2 = evaluator_r2.evaluate(rf_predictions)
-
-    # gbt_rmse = evaluator_rmse.evaluate(gbt_predictions)
-    # gbt_mae = evaluator_mae.evaluate(gbt_predictions)
-    # gbt_r2 = evaluator_r2.evaluate(gbt_predictions)
-
-    # Print the metrics for each model
-    print("Linear Regression Metrics:")
-    print(f"RMSE: {lr_rmse}")
-    print(f"MAE: {lr_mae}")
-    print(f"R²: {lr_r2}")
-
-    print("\nDecision Tree Regressor Metrics:")
-    print(f"RMSE: {dt_rmse}")
-    print(f"MAE: {dt_mae}")
-    print(f"R²: {dt_r2}")
-
-    print("\nRandom Forest Regressor Metrics:")
-    print(f"RMSE: {rf_rmse}")
-    print(f"MAE: {rf_mae}")
-    print(f"R²: {rf_r2}")
-
-    # print("\nGradient-Boosted Tree Regressor Metrics:")
-    # print(f"RMSE: {gbt_rmse}")
-    # print(f"MAE: {gbt_mae}")
-    # print(f"R²: {gbt_r2}")
-
+    print("GaussianMixture Clustering Results:")
+    gmm_evaluation.show()
 
 if __name__ == "__main__":
     main()

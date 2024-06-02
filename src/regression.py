@@ -7,15 +7,14 @@ from sys import exit, stderr
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import Imputer, VectorAssembler
 from pyspark.ml.regression import (
-    DecisionTreeRegressor,
-    GBTRegressor,
+    DecisionTreeRegressor,  # GBTRegressor,
     LinearRegression,
     RandomForestRegressor,
 )
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.sql.types import FloatType, IntegerType, StructField, StructType
 
-from src.lib import create_spark_session
+from lib import create_spark_session # type: ignore
 
 boston_housing_file = Path(".") / "data" / "HousingData.csv"
 if not boston_housing_file.exists():
