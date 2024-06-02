@@ -6,55 +6,42 @@ from sys import exit, stderr
 
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.feature import Imputer, VectorAssembler
-from pyspark.ml.regression import (
-    DecisionTreeRegressor,
-    GBTRegressor,
-    LinearRegression,
-    RandomForestRegressor,
-)
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
-from pyspark.sql.types import FloatType, IntegerType, StructField, StructType
+from pyspark.sql.types import (
+    FloatType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+)
 
 from src.lib import create_spark_session
 
-boston_housing_file = Path(".") / "data" / "HousingData.csv"
-if not boston_housing_file.exists():
-    print(f"DataFile {boston_housing_file} doesnt exist", file=stderr)
+iris_file = Path(".") / "data" / "Iris.csv"
+if not iris_file.exists():
+    print(f"DataFile {iris_file} doesnt exist", file=stderr)
     exit(1)
 
-boston_housing_schema = StructType(
+"""
+Id,SepalLengthCm,SepalWidthCm,PetalLengthCm,PetalWidthCm,Species
+"""
+
+iris_schema = StructType(
     [
-        StructField("CRIM", FloatType(), True),
-        StructField("ZN", FloatType(), True),
-        StructField("INDUS", FloatType(), True),
-        StructField("CHAS", IntegerType(), True),
-        StructField("NOX", FloatType(), True),
-        StructField("RM", FloatType(), True),
-        StructField("AGE", FloatType(), True),
-        StructField("DIS", FloatType(), True),
-        StructField("RAD", IntegerType(), True),
-        StructField("TAX", FloatType(), True),
-        StructField("PTRATIO", FloatType(), True),
-        StructField("B", FloatType(), True),
-        StructField("LSTAT", FloatType(), True),
-        StructField("MEDV", FloatType(), True),  # -> Target variable
+        StructField("Id", IntegerType(), False),
+        StructField("SepalLengthCm", FloatType(), True),
+        StructField("SepalWidthCm", FloatType(), True),
+        StructField("PetalLengthCm", FloatType(), True),
+        StructField("PetalWidthCm", FloatType(), True),
+        StructField("Species", StringType(), True),  # -> Target variable
     ]
 )
 
 feature_cols = [
-    "CRIM",  # per capita crime rate by town
-    "ZN",  # proportion of residential land zoned for lots over 25,000 sq. ft.
-    "INDUS",  # proportion of non-retail business acres per town
-    "CHAS",  # Charles River dummy variable (1 if tract bounds river; 0 otherwise)
-    "NOX",  # nitric oxides concentration (parts per 10 million)
-    "RM",  # average number of rooms per dwelling
-    "AGE",  # proportion of owner-occupied units built prior to 1940
-    "DIS",  # weighted distances to five Boston employment centers
-    "RAD",  # index of accessibility to radial highways
-    "TAX",  # full-value property tax rate per $10,000
-    "PTRATIO",  # pupil-teacher ratio by town
-    "B",  # 1000(Bk - 0.63)^2 where Bk is the proportion of black residents by town
-    "LSTAT",  # percentage of lower status of the population
+    "SepalLengthCm",
+    "SepalWidthCm",
+    "PetalLengthCm",
+    "PetalWidthCm",
 ]
 
 
