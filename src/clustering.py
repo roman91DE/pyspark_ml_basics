@@ -22,10 +22,6 @@ if not iris_file.exists():
     print(f"DataFile {iris_file} doesnt exist", file=stderr)
     exit(1)
 
-"""
-Id,SepalLengthCm,SepalWidthCm,PetalLengthCm,PetalWidthCm,Species
-"""
-
 iris_schema = StructType(
     [
         StructField("Id", IntegerType(), False),
