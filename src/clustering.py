@@ -3,7 +3,8 @@
 import atexit
 from pathlib import Path
 from sys import exit, stderr
-from pyspark.ml.clustering import KMeans, GaussianMixture
+
+from pyspark.ml.clustering import GaussianMixture, KMeans
 from pyspark.ml.evaluation import ClusteringEvaluator
 from pyspark.ml.feature import VectorAssembler
 from pyspark.sql.functions import col, when
@@ -14,7 +15,8 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
-from lib import create_spark_session # type: ignore
+
+from lib import create_spark_session  # type: ignore
 
 iris_file = Path(".") / "data" / "Iris.csv"
 if not iris_file.exists():
@@ -39,14 +41,13 @@ feature_cols = [
     "PetalWidthCm",
 ]
 
+
 def main():
 
     spark = create_spark_session("PySpark-Clustering")
     atexit.register(lambda: spark.stop())
 
-    df = spark.read.csv(
-        str(iris_file), schema=iris_schema, header=True
-    ).drop("Id")
+    df = spark.read.csv(str(iris_file), schema=iris_schema, header=True).drop("Id")
 
     df.show()
 
@@ -55,16 +56,12 @@ def main():
     df = assembler.transform(df)
 
     # Map species to integers
-    species_map = {
-        "Iris-setosa": 0,
-        "Iris-versicolor": 1,
-        "Iris-virginica": 2
-    }
+    species_map = {"Iris-setosa": 0, "Iris-versicolor": 1, "Iris-virginica": 2}
     df = df.withColumn(
         "SpeciesIndex",
         when(col("Species") == "Iris-setosa", 0)
         .when(col("Species") == "Iris-versicolor", 1)
-        .when(col("Species") == "Iris-virginica", 2)
+        .when(col("Species") == "Iris-virginica", 2),
     )
 
     # Define KMeans model
@@ -91,14 +88,23 @@ def main():
     gmm_predictions.show()
 
     # Evaluate clustering results against actual species labels
-    kmeans_evaluation = kmeans_predictions.groupBy("SpeciesIndex", "prediction").count().orderBy("SpeciesIndex", "prediction")
-    gmm_evaluation = gmm_predictions.groupBy("SpeciesIndex", "prediction").count().orderBy("SpeciesIndex", "prediction")
+    kmeans_evaluation = (
+        kmeans_predictions.groupBy("SpeciesIndex", "prediction")
+        .count()
+        .orderBy("SpeciesIndex", "prediction")
+    )
+    gmm_evaluation = (
+        gmm_predictions.groupBy("SpeciesIndex", "prediction")
+        .count()
+        .orderBy("SpeciesIndex", "prediction")
+    )
 
     print("KMeans Clustering Results:")
     kmeans_evaluation.show()
 
     print("GaussianMixture Clustering Results:")
     gmm_evaluation.show()
+
 
 if __name__ == "__main__":
     main()
